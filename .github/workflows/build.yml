@@ -23,6 +23,9 @@ jobs:
             git
             mingw-w64-i686-gcc 
             mingw-w64-i686-curl
+            mingw-w64-i686-libxml2
+            mingw-w64-i686-libusb
+            mingw-w64-i686-pkg-config
             libtool
             openssl
             openssl-devel
@@ -32,23 +35,33 @@ jobs:
             automake
             make
             zip
-            libxml2-devel
-            libxslt-devel
-            libusb-devel
           update: true
 
       - name: Configure and Build
         shell: msys2 {0}
         run: |
-          repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice" "usbmuxd" "libideviceactivation")
-          for repo in "${repos[@]}"; do
-            echo "Building $repo..."
+          # First build essential dependencies
+          repos_core=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu")
+          for repo in "${repos_core[@]}"; do
+            echo "Building core dependency $repo..."
             git clone "https://github.com/libimobiledevice/$repo"
-            pushd "$repo" > /dev/null
-            ./autogen.sh
+            cd "$repo"
+            ./autogen.sh --prefix=/mingw32
             make -j$(nproc)
             make install
-            popd > /dev/null
+            cd ..
+          done
+
+          # Then build main components
+          repos_main=("libimobiledevice" "usbmuxd" "libideviceactivation")
+          for repo in "${repos_main[@]}"; do
+            echo "Building $repo..."
+            git clone "https://github.com/libimobiledevice/$repo"
+            cd "$repo"
+            ./autogen.sh --prefix=/mingw32
+            make -j$(nproc)
+            make install
+            cd ..
           done
 
       - name: Release
@@ -62,6 +75,7 @@ jobs:
                                       -name "afcclient.exe" -o \
                                       -name "libusbmuxd*" -o \
                                       -name "usbmuxd*" -o \
+                                      -name "ideviceactivation*" -o \
                                       -name "inetcat.exe" -o \
                                       -name "iproxy.exe" -o \
                                       -name "libtatsu*.dll" -o \
@@ -78,7 +92,6 @@ jobs:
                                       -name "libzstd*.dll" -o \
                                       -name "libcrypto*.dll" -o \
                                       -name "libxml2*.dll" -o \
-                                      -name "libxslt*.dll" -o \
                                       -name "libusb*.dll" -o \
                                       -name "libssl*.dll" \) \
                                       -exec cp -v {} rel \;
