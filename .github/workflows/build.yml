@@ -18,11 +18,11 @@ jobs:
       - name: Set up MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: MINGW32
           install: >
             git
-            mingw-w64-x86_64-gcc 
-            mingw-w64-x86_64-curl
+            mingw-w64-i686-gcc 
+            mingw-w64-i686-curl
             libtool
             openssl
             openssl-devel
@@ -32,12 +32,15 @@ jobs:
             automake
             make
             zip
+            libxml2-devel
+            libxslt-devel
+            libusb-devel
           update: true
 
       - name: Configure and Build
         shell: msys2 {0}
         run: |
-          repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice")
+          repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice" "usbmuxd" "libideviceactivation")
           for repo in "${repos[@]}"; do
             echo "Building $repo..."
             git clone "https://github.com/libimobiledevice/$repo"
@@ -47,19 +50,22 @@ jobs:
             make install
             popd > /dev/null
           done
+
       - name: Release
         shell: msys2 {0}
         run: |
           mkdir -p rel
-          find /mingw64/bin/ -type f \( -name "*idevice*" -o \
+          find /mingw32/bin/ -type f \( -name "*idevice*" -o \
                                       -name "libimobiledevice*" -o \
                                       -name "libplist*" -o \
                                       -name "plistutil.exe" -o \
                                       -name "afcclient.exe" -o \
                                       -name "libusbmuxd*" -o \
+                                      -name "usbmuxd*" -o \
                                       -name "inetcat.exe" -o \
                                       -name "iproxy.exe" -o \
                                       -name "libtatsu*.dll" -o \
+                                      -name "libideviceactivation*" -o \
                                       -name "zlib*.dll" -o \
                                       -name "libbrotli*.dll" -o \
                                       -name "libiconv*.dll" -o \
@@ -71,9 +77,13 @@ jobs:
                                       -name "libpsl*.dll" -o \
                                       -name "libzstd*.dll" -o \
                                       -name "libcrypto*.dll" -o \
+                                      -name "libxml2*.dll" -o \
+                                      -name "libxslt*.dll" -o \
+                                      -name "libusb*.dll" -o \
                                       -name "libssl*.dll" \) \
                                       -exec cp -v {} rel \;
-          cd rel && zip -r ../libimobile-suite-latest_w64.zip .
+          cd rel && zip -r ../libimobile-suite-latest_w32.zip .
+
       - name: publish release
         env:
           github_token: ${{secrets.GITHUB_TOKEN}}
@@ -82,6 +92,5 @@ jobs:
           echo "TAG=$TAG" >> $GITHUB_ENV
           echo "Generated tag: $TAG"
           gh release create "$TAG" --title "Release"
-          gh release upload "$TAG" libimobile-suite-latest_w64.zip  
+          gh release upload "$TAG" libimobile-suite-latest_w32.zip  
         shell: bash
-
