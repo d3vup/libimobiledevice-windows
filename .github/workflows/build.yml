@@ -18,11 +18,11 @@ jobs:
       - name: Set up MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: MINGW32
           install: >
             git
-            mingw-w64-x86_64-gcc 
-            mingw-w64-x86_64-curl
+            mingw-w64-i686-gcc 
+            mingw-w64-i686-curl
             libtool
             openssl
             openssl-devel
@@ -51,7 +51,7 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p rel
-          find /mingw64/bin/ -type f \( -name "*idevice*" -o \
+          find /mingw32/bin/ -type f \( -name "*idevice*" -o \
                                       -name "libimobiledevice*" -o \
                                       -name "libplist*" -o \
                                       -name "plistutil.exe" -o \
@@ -73,7 +73,7 @@ jobs:
                                       -name "libcrypto*.dll" -o \
                                       -name "libssl*.dll" \) \
                                       -exec cp -v {} rel \;
-          cd rel && zip -r ../libimobile-suite-latest_w64.zip .
+          cd rel && zip -r ../libimobile-suite-latest_w32.zip .
       - name: publish release
         env:
           github_token: ${{secrets.GITHUB_TOKEN}}
@@ -82,6 +82,5 @@ jobs:
           echo "TAG=$TAG" >> $GITHUB_ENV
           echo "Generated tag: $TAG"
           gh release create "$TAG" --title "Release"
-          gh release upload "$TAG" libimobile-suite-latest_w64.zip  
+          gh release upload "$TAG" libimobile-suite-latest_w32.zip  
         shell: bash
-
