@@ -1,109 +1,110 @@
-name: build
+name: build-libimobiledevice-static
 
 on:
   schedule:
-      - cron: '0 0 * * 0'
+    - cron: '0 0 * * 0'
   workflow_dispatch:
 
 permissions:
-  contents: write 
+  contents: write
 
 jobs:
-  build:
+  build-static-libs:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x86, x64]
+        include:
+          - arch: x86
+            msystem: MINGW32
+            host: i686-w64-mingw32
+          - arch: x64
+            msystem: MINGW64
+            host: x86_64-w64-mingw32
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up MSYS2
+      - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW32
+          msystem: ${{ matrix.msystem }}
+          update: true
           install: >
             git
-            mingw-w64-i686-gcc 
-            mingw-w64-i686-curl
-            mingw-w64-i686-libxml2
-            mingw-w64-i686-libusb-1.0
-            mingw-w64-i686-pkgconf
-            libtool
-            openssl
-            openssl-devel
-            python-devel
-            pkgconf
+            base-devel
+            mingw-w64-${{ matrix.arch }}-toolchain
+            mingw-w64-${{ matrix.arch }}-cmake
+            mingw-w64-${{ matrix.arch }}-pkg-config
+            mingw-w64-${{ matrix.arch }}-libtool
+            mingw-w64-${{ matrix.arch }}-openssl
             autoconf
             automake
             make
             zip
-          update: true
 
-      - name: Configure and Build
+      - name: Build static libraries
         shell: msys2 {0}
         run: |
-          # First build essential dependencies
-          repos_core=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu")
-          for repo in "${repos_core[@]}"; do
-            echo "Building core dependency $repo..."
-            git clone "https://github.com/libimobiledevice/$repo"
-            cd "$repo"
-            ./autogen.sh --prefix=/mingw32
+          set -e
+
+          repos=(
+            "libplist"
+            "libimobiledevice-glue"
+            "libusbmuxd"
+            "libtatsu"
+            "libimobiledevice"
+          )
+
+          mkdir -p /c/static-libs-${{ matrix.arch }}
+
+          for repo in "${repos[@]}"; do
+            echo "Building $repo (${{ matrix.arch }})"
+            git clone https://github.com/libimobiledevice/$repo.git
+            cd $repo
+
+            ./autogen.sh \
+              --host=${{ matrix.host }} \
+              --prefix=/c/static-libs-${{ matrix.arch }} \
+              --enable-static \
+              --disable-shared
+
             make -j$(nproc)
             make install
+
             cd ..
+            rm -rf $repo
           done
 
-          # Then build main components
-          repos_main=("libimobiledevice" "usbmuxd" "libideviceactivation")
-          for repo in "${repos_main[@]}"; do
-            echo "Building $repo..."
-            git clone "https://github.com/libimobiledevice/$repo"
-            cd "$repo"
-            ./autogen.sh --prefix=/mingw32
-            make -j$(nproc)
-            make install
-            cd ..
-          done
-
-      - name: Release
+      - name: Package static libraries
         shell: msys2 {0}
         run: |
-          mkdir -p rel
-          find /mingw32/bin/ -type f \( -name "*idevice*" -o \
-                                      -name "libimobiledevice*" -o \
-                                      -name "libplist*" -o \
-                                      -name "plistutil.exe" -o \
-                                      -name "afcclient.exe" -o \
-                                      -name "libusbmuxd*" -o \
-                                      -name "usbmuxd*" -o \
-                                      -name "ideviceactivation*" -o \
-                                      -name "inetcat.exe" -o \
-                                      -name "iproxy.exe" -o \
-                                      -name "libtatsu*.dll" -o \
-                                      -name "libideviceactivation*" -o \
-                                      -name "zlib*.dll" -o \
-                                      -name "libbrotli*.dll" -o \
-                                      -name "libiconv*.dll" -o \
-                                      -name "libunistring*.dll" -o \
-                                      -name "libssh*.dll" -o \
-                                      -name "libintl*.dll" -o \
-                                      -name "libidn*.dll" -o \
-                                      -name "libnghttp*.dll" -o \
-                                      -name "libpsl*.dll" -o \
-                                      -name "libzstd*.dll" -o \
-                                      -name "libcrypto*.dll" -o \
-                                      -name "libxml2*.dll" -o \
-                                      -name "libusb*.dll" -o \
-                                      -name "libssl*.dll" \) \
-                                      -exec cp -v {} rel \;
-          cd rel && zip -r ../libimobile-suite-latest_w32.zip .
+          mkdir -p release-${{ matrix.arch }}
 
-      - name: publish release
+          cp /c/static-libs-${{ matrix.arch }}/lib/libusbmuxd-2.0.lib release-${{ matrix.arch }}/
+          cp /c/static-libs-${{ matrix.arch }}/lib/libplist-2.0.lib     release-${{ matrix.arch }}/
+          cp /c/static-libs-${{ matrix.arch }}/lib/libimobiledevice-1.0.lib release-${{ matrix.arch }}/
+
+          cp /c/static-libs-${{ matrix.arch }}/bin/*.dll release-${{ matrix.arch }}/ 2>/dev/null || true
+
+          cd release-${{ matrix.arch }}
+          zip -r ../libimobiledevice-static-${{ matrix.arch }}.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libimobiledevice-static-${{ matrix.arch }}
+          path: libimobiledevice-static-${{ matrix.arch }}.zip
+
+      - name: Create or update GitHub Release
         env:
-          github_token: ${{secrets.GITHUB_TOKEN}}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "Generated tag: $TAG"
-          gh release create "$TAG" --title "Release"
-          gh release upload "$TAG" libimobile-suite-latest_w32.zip  
-        shell: bash
+          TAG="static-$(date +'%Y%m%d')-${{ github.run_number }}"
+          gh release create "$TAG" \
+            --title "Static Build ${{ matrix.arch }} $TAG" \
+            --notes "Static .lib files + runtime DLLs (for C# Native AOT)" \
+            libimobiledevice-static-${{ matrix.arch }}.zip || echo "Release exists, uploading assets"
+
+          gh release upload "$TAG" libimobiledevice-static-${{ matrix.arch }}.zip --clobber
