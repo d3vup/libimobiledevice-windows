@@ -47,46 +47,48 @@ jobs:
             make install
             popd > /dev/null
           done
-		- name: Release
-				shell: msys2 {0}
-				run: |
-				  mkdir -p rel
-				  find /mingw32/bin/ /mingw32/lib/ -type f \( -name "*idevice*" -o \
-											  -name "libimobiledevice*" -o \
-											  -name "libplist*" -o \
-											  -name "plistutil.exe" -o \
-											  -name "afcclient.exe" -o \
-											  -name "libusbmuxd*" -o \
-											  -name "inetcat.exe" -o \
-											  -name "iproxy.exe" -o \
-											  -name "libtatsu*.dll" -o \
-											  -name "libtatsu*.lib" -o \
-											  -name "zlib*.dll" -o \
-											  -name "zlib*.lib" -o \
-											  -name "libbrotli*.dll" -o \
-											  -name "libbrotli*.lib" -o \
-											  -name "libiconv*.dll" -o \
-											  -name "libiconv*.lib" -o \
-											  -name "libunistring*.dll" -o \
-											  -name "libunistring*.lib" -o \
-											  -name "libssh*.dll" -o \
-											  -name "libssh*.lib" -o \
-											  -name "libintl*.dll" -o \
-											  -name "libintl*.lib" -o \
-											  -name "libidn*.dll" -o \
-											  -name "libidn*.lib" -o \
-											  -name "libnghttp*.dll" -o \
-											  -name "libnghttp*.lib" -o \
-											  -name "libpsl*.dll" -o \
-											  -name "libpsl*.lib" -o \
-											  -name "libzstd*.dll" -o \
-											  -name "libzstd*.lib" -o \
-											  -name "libcrypto*.dll" -o \
-											  -name "libcrypto*.lib" -o \
-											  -name "libssl*.dll" -o \
-											  -name "libssl*.lib" \) \
-											  -exec cp -v {} rel \;
-				  cd rel && zip -r ../libimobile-suite-latest_w32.zip .
+          
+      - name: Release
+        shell: msys2 {0}
+        run: |
+          mkdir -p rel
+          find /mingw32/bin/ /mingw32/lib/ -type f \( -name "*idevice*" -o \
+                                      -name "libimobiledevice*" -o \
+                                      -name "libplist*" -o \
+                                      -name "plistutil.exe" -o \
+                                      -name "afcclient.exe" -o \
+                                      -name "libusbmuxd*" -o \
+                                      -name "inetcat.exe" -o \
+                                      -name "iproxy.exe" -o \
+                                      -name "libtatsu*.dll" -o \
+                                      -name "libtatsu*.lib" -o \
+                                      -name "zlib*.dll" -o \
+                                      -name "zlib*.lib" -o \
+                                      -name "libbrotli*.dll" -o \
+                                      -name "libbrotli*.lib" -o \
+                                      -name "libiconv*.dll" -o \
+                                      -name "libiconv*.lib" -o \
+                                      -name "libunistring*.dll" -o \
+                                      -name "libunistring*.lib" -o \
+                                      -name "libssh*.dll" -o \
+                                      -name "libssh*.lib" -o \
+                                      -name "libintl*.dll" -o \
+                                      -name "libintl*.lib" -o \
+                                      -name "libidn*.dll" -o \
+                                      -name "libidn*.lib" -o \
+                                      -name "libnghttp*.dll" -o \
+                                      -name "libnghttp*.lib" -o \
+                                      -name "libpsl*.dll" -o \
+                                      -name "libpsl*.lib" -o \
+                                      -name "libzstd*.dll" -o \
+                                      -name "libzstd*.lib" -o \
+                                      -name "libcrypto*.dll" -o \
+                                      -name "libcrypto*.lib" -o \
+                                      -name "libssl*.dll" -o \
+                                      -name "libssl*.lib" \) \
+                                      -exec cp -v {} rel \;
+          cd rel && zip -r ../libimobile-suite-latest_w32.zip .
+
       - name: publish release
         env:
           github_token: ${{secrets.GITHUB_TOKEN}}
