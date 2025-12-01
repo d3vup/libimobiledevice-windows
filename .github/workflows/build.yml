@@ -1,4 +1,4 @@
-name: build-libimobiledevice-static
+name: build
 
 on:
   schedule:
@@ -9,19 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build-static-libs:
+  build:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [x86, x64]
-        include:
-          - arch: x86
-            msystem: MINGW32
-            host: i686-w64-mingw32
-          - arch: x64
-            msystem: MINGW64
-            host: x86_64-w64-mingw32
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,82 +18,50 @@ jobs:
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: ${{ matrix.msystem }}
+          msystem: MINGW32
           update: true
           install: >
             git
             base-devel
-            mingw-w64-${{ matrix.arch }}-toolchain
-            mingw-w64-${{ matrix.arch }}-cmake
-            mingw-w64-${{ matrix.arch }}-pkg-config
-            mingw-w64-${{ matrix.arch }}-libtool
-            mingw-w64-${{ matrix.arch }}-openssl
+            mingw-w64-i686-toolchain
+            mingw-w64-i686-cmake
+            mingw-w64-i686-libtool
+            mingw-w64-i686-openssl
+            mingw-w64-i686-pkg-config
             autoconf
             automake
             make
             zip
 
-      - name: Build static libraries
+      - name: Build
         shell: msys2 {0}
         run: |
-          set -e
-
-          repos=(
-            "libplist"
-            "libimobiledevice-glue"
-            "libusbmuxd"
-            "libtatsu"
-            "libimobiledevice"
-          )
-
-          mkdir -p /c/static-libs-${{ matrix.arch }}
-
+          repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice")
           for repo in "${repos[@]}"; do
-            echo "Building $repo (${{ matrix.arch }})"
-            git clone https://github.com/libimobiledevice/$repo.git
-            cd $repo
-
-            ./autogen.sh \
-              --host=${{ matrix.host }} \
-              --prefix=/c/static-libs-${{ matrix.arch }} \
-              --enable-static \
-              --disable-shared
-
+            git clone "https://github.com/libimobiledevice/$repo"
+            cd "$repo"
+            ./autogen.sh --enable-static --disable-shared
             make -j$(nproc)
             make install
-
             cd ..
-            rm -rf $repo
+            rm -rf "$repo"
           done
 
-      - name: Package static libraries
+      - name: Package
         shell: msys2 {0}
         run: |
-          mkdir -p release-${{ matrix.arch }}
+          mkdir -p rel
+          find /mingw32/bin -type f \( -name "*.dll" -o -name "*.exe" \) -exec cp {} rel/ \;
+          cp /mingw32/lib/libusbmuxd-2.0.lib      rel/ 2>/dev/null || true
+          cp /mingw32/lib/libplist-2.0.lib        rel/ 2>/dev/null || true
+          cp /mingw32/lib/libimobiledevice-1.0.lib rel/ 2>/dev/null || true
+          cd rel
+          zip -r ../libimobile-suite-latest_w32.zip .
 
-          cp /c/static-libs-${{ matrix.arch }}/lib/libusbmuxd-2.0.lib release-${{ matrix.arch }}/
-          cp /c/static-libs-${{ matrix.arch }}/lib/libplist-2.0.lib     release-${{ matrix.arch }}/
-          cp /c/static-libs-${{ matrix.arch }}/lib/libimobiledevice-1.0.lib release-${{ matrix.arch }}/
-
-          cp /c/static-libs-${{ matrix.arch }}/bin/*.dll release-${{ matrix.arch }}/ 2>/dev/null || true
-
-          cd release-${{ matrix.arch }}
-          zip -r ../libimobiledevice-static-${{ matrix.arch }}.zip .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: libimobiledevice-static-${{ matrix.arch }}
-          path: libimobiledevice-static-${{ matrix.arch }}.zip
-
-      - name: Create or update GitHub Release
+      - name: Publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="static-$(date +'%Y%m%d')-${{ github.run_number }}"
-          gh release create "$TAG" \
-            --title "Static Build ${{ matrix.arch }} $TAG" \
-            --notes "Static .lib files + runtime DLLs (for C# Native AOT)" \
-            libimobiledevice-static-${{ matrix.arch }}.zip || echo "Release exists, uploading assets"
-
-          gh release upload "$TAG" libimobiledevice-static-${{ matrix.arch }}.zip --clobber
+          TAG="v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          gh release create "$TAG" --title "Weekly Build" --generate-notes
+          gh release upload "$TAG" libimobile-suite-latest_w32.zip --clobber
