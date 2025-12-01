@@ -33,27 +33,31 @@ jobs:
             make
             zip
 
-      - name: Build
+      - name: Build all as static
         shell: msys2 {0}
         run: |
+          export PKG_CONFIG_PATH=/mingw32/lib/pkgconfig:$PKG_CONFIG_PATH
+          export LDFLAGS="-static -static-libgcc -static-libstdc++"
+
           repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice")
+
           for repo in "${repos[@]}"; do
-            git clone "https://github.com/libimobiledevice/$repo"
-            cd "$repo"
-            ./autogen.sh --enable-static --disable-shared
+            git clone https://github.com/libimobiledevice/$repo.git
+            cd $repo
+            ./autogen.sh --enable-static --disable-shared --prefix=/mingw32
             make -j$(nproc)
             make install
             cd ..
-            rm -rf "$repo"
+            rm -rf $repo
           done
 
       - name: Package
         shell: msys2 {0}
         run: |
           mkdir -p rel
-          find /mingw32/bin -type f \( -name "*.dll" -o -name "*.exe" \) -exec cp {} rel/ \;
-          cp /mingw32/lib/libusbmuxd-2.0.lib      rel/ 2>/dev/null || true
-          cp /mingw32/lib/libplist-2.0.lib        rel/ 2>/dev/null || true
+          find /mingw32/bin -type f \( -name "*.dll" -o -name "*.exe" \) -o -name "iproxy" \) -exec cp {} rel/ \; 2>/dev/null || true
+          cp /mingw32/lib/libusbmuxd-2.0.lib rel/
+          cp /mingw32/lib/libplist-2.0.lib rel/ 2>/dev/null || true
           cp /mingw32/lib/libimobiledevice-1.0.lib rel/ 2>/dev/null || true
           cd rel
           zip -r ../libimobile-suite-latest_w32.zip .
@@ -63,5 +67,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
-          gh release create "$TAG" --title "Weekly Build" --generate-notes
+          gh release create "$TAG" --title "Weekly Build" --generate-notes || true
           gh release upload "$TAG" libimobile-suite-latest_w32.zip --clobber
