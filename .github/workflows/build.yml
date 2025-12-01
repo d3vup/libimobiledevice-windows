@@ -2,85 +2,98 @@ name: build
 
 on:
   schedule:
-    - cron: '0 0 * * 0'
+      - cron: '0 0 * * 0'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write 
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: msys2/setup-msys2@v2
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW32
-          update: true
-          install: >-
+          install: >
             git
-            base-devel
-            mingw-w64-i686-toolchain
-            mingw-w64-i686-cmake
-            mingw-w64-i686-libtool
-            mingw-w64-i686-openssl
-            mingw-w64-i686-pkg-config
+            mingw-w64-i686-gcc 
+            mingw-w64-i686-curl
+            libtool
+            openssl
+            openssl-devel
+            python-devel
+            pkgconf
             autoconf
             automake
-            automake-wrapper
             make
             zip
+          update: true
 
-      - name: Build full static chain
+      - name: Configure and Build
         shell: msys2 {0}
         run: |
-          export CFLAGS="-O2 -static"
-          export CXXFLAGS="-O2 -static"
-          export LDFLAGS="-static -static-libgcc -static-libstdc++"
-
-          repos="libplist libimobiledevice-glue libusbmuxd"
-
-          for repo in $repos; do
-            echo "=== Building $repo ==="
-            git clone https://github.com/libimobiledevice/$repo.git
-            cd $repo
-
-            ./autogen.sh \
-              --host=i686-w64-mingw32 \
-              --prefix=/mingw32 \
-              --enable-static \
-              --disable-shared \
-              --disable-dependency-tracking
-
+          repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice")
+          for repo in "${repos[@]}"; do
+            echo "Building $repo..."
+            git clone "https://github.com/libimobiledevice/$repo"
+            pushd "$repo" > /dev/null
+            ./autogen.sh
             make -j$(nproc)
             make install
-
-            cd ..
-            rm -rf $repo
+            popd > /dev/null
           done
-
-          git clone https://github.com/libimobiledevice/libusbmuxd.git libusbmuxd-final
-          cd libusbmuxd-final
-          ./autogen.sh \
-            --host=i686-w64-mingw32 \
-            --prefix=/mingw32 \
-            --enable-static \
-            --disable-shared
-          make -j$(nproc)
-
-      - name: Package only the .lib we need
-        shell: msys2 {0}
-        run: |
-          mkdir rel
-          cp libusbmuxd-final/src/.libs/libusbmuxd-2.0.a rel/libusbmuxd-2.0.lib
-          cp /mingw32/lib/libplist-2.0.a rel/ || true
-          zip -j libusbmuxd-static-w32.zip rel/*
-
-      - name: Upload
+		- name: Release
+				shell: msys2 {0}
+				run: |
+				  mkdir -p rel
+				  find /mingw32/bin/ /mingw32/lib/ -type f \( -name "*idevice*" -o \
+											  -name "libimobiledevice*" -o \
+											  -name "libplist*" -o \
+											  -name "plistutil.exe" -o \
+											  -name "afcclient.exe" -o \
+											  -name "libusbmuxd*" -o \
+											  -name "inetcat.exe" -o \
+											  -name "iproxy.exe" -o \
+											  -name "libtatsu*.dll" -o \
+											  -name "libtatsu*.lib" -o \
+											  -name "zlib*.dll" -o \
+											  -name "zlib*.lib" -o \
+											  -name "libbrotli*.dll" -o \
+											  -name "libbrotli*.lib" -o \
+											  -name "libiconv*.dll" -o \
+											  -name "libiconv*.lib" -o \
+											  -name "libunistring*.dll" -o \
+											  -name "libunistring*.lib" -o \
+											  -name "libssh*.dll" -o \
+											  -name "libssh*.lib" -o \
+											  -name "libintl*.dll" -o \
+											  -name "libintl*.lib" -o \
+											  -name "libidn*.dll" -o \
+											  -name "libidn*.lib" -o \
+											  -name "libnghttp*.dll" -o \
+											  -name "libnghttp*.lib" -o \
+											  -name "libpsl*.dll" -o \
+											  -name "libpsl*.lib" -o \
+											  -name "libzstd*.dll" -o \
+											  -name "libzstd*.lib" -o \
+											  -name "libcrypto*.dll" -o \
+											  -name "libcrypto*.lib" -o \
+											  -name "libssl*.dll" -o \
+											  -name "libssl*.lib" \) \
+											  -exec cp -v {} rel \;
+				  cd rel && zip -r ../libimobile-suite-latest_w32.zip .
+      - name: publish release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{secrets.GITHUB_TOKEN}}
         run: |
-          TAG="static-$(date +%Y%m%d-%H%M)"
-          gh release create "$TAG" --title "$TAG" --generate-notes
-          gh release upload "$TAG" libusbmuxd-static-w32.zip --clobber
+          TAG="v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "Generated tag: $TAG"
+          gh release create "$TAG" --title "Release"
+          gh release upload "$TAG" libimobile-suite-latest_w32.zip  
+        shell: bash
