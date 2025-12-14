@@ -80,13 +80,13 @@ jobs:
       - name: Create usage example
         shell: bash
         run: |
-          cat > release/README.md << 'EOF'
+          cat > release/README.md << 'ENDOFFILE'
           # libimobiledevice for .NET Native AOT
           
           ## Usage in C# Project
           
           Add to your .csproj:
-```xml
+          
           <ItemGroup>
             <NativeLibrary Include="lib\libimobiledevice-1.0.lib" />
             <NativeLibrary Include="lib\libplist-2.0.lib" />
@@ -96,8 +96,7 @@ jobs:
             <NativeLibrary Include="lib\libssl.lib" />
             <NativeLibrary Include="lib\libcrypto.lib" />
           </ItemGroup>
-```
-          EOF
+          ENDOFFILE
       
       - name: Package Release
         shell: bash
