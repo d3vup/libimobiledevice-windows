@@ -1,101 +1,63 @@
 name: build
-
 on:
   schedule:
       - cron: '0 0 * * 0'
   workflow_dispatch:
-
 permissions:
   contents: write 
-
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW32
-          install: >
-            git
-            mingw-w64-i686-gcc 
-            mingw-w64-i686-curl
-            libtool
-            openssl
-            openssl-devel
-            python-devel
-            pkgconf
-            autoconf
-            automake
-            make
-            zip
-          update: true
-
-      - name: Configure and Build
-        shell: msys2 {0}
+      
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v1
+      
+      - name: Setup vcpkg
         run: |
-          repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice")
-          for repo in "${repos[@]}"; do
-            echo "Building $repo..."
-            git clone "https://github.com/libimobiledevice/$repo"
-            pushd "$repo" > /dev/null
-            ./autogen.sh
-            make -j$(nproc)
-            make install
-            popd > /dev/null
-          done
+          git clone https://github.com/Microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg integrate install
+      
+      - name: Install dependencies
+        run: |
+          .\vcpkg\vcpkg install openssl:x86-windows curl:x86-windows
+      
+      - name: Build with MSVC
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
           
-      - name: Release
-        shell: msys2 {0}
+          set repos=libplist libimobiledevice-glue libusbmuxd libtatsu libimobiledevice
+          for %%r in (%repos%) do (
+            git clone https://github.com/libimobiledevice/%%r
+            cd %%r
+            cmake -B build -G "NMake Makefiles" ^
+              -DCMAKE_BUILD_TYPE=Release ^
+              -DCMAKE_INSTALL_PREFIX=../install ^
+              -DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake
+            cmake --build build --config Release
+            cmake --install build
+            cd ..
+          )
+      
+      - name: Package Release
         run: |
-          mkdir -p rel
-          find /mingw32/bin/ /mingw32/lib/ -type f \( -name "*idevice*" -o \
-                                      -name "libimobiledevice*" -o \
-                                      -name "libplist*" -o \
-                                      -name "plistutil.exe" -o \
-                                      -name "afcclient.exe" -o \
-                                      -name "libusbmuxd*" -o \
-                                      -name "inetcat.exe" -o \
-                                      -name "iproxy.exe" -o \
-                                      -name "libtatsu*.dll" -o \
-                                      -name "libtatsu*.lib" -o \
-                                      -name "zlib*.dll" -o \
-                                      -name "zlib*.lib" -o \
-                                      -name "libbrotli*.dll" -o \
-                                      -name "libbrotli*.lib" -o \
-                                      -name "libiconv*.dll" -o \
-                                      -name "libiconv*.lib" -o \
-                                      -name "libunistring*.dll" -o \
-                                      -name "libunistring*.lib" -o \
-                                      -name "libssh*.dll" -o \
-                                      -name "libssh*.lib" -o \
-                                      -name "libintl*.dll" -o \
-                                      -name "libintl*.lib" -o \
-                                      -name "libidn*.dll" -o \
-                                      -name "libidn*.lib" -o \
-                                      -name "libnghttp*.dll" -o \
-                                      -name "libnghttp*.lib" -o \
-                                      -name "libpsl*.dll" -o \
-                                      -name "libpsl*.lib" -o \
-                                      -name "libzstd*.dll" -o \
-                                      -name "libzstd*.lib" -o \
-                                      -name "libcrypto*.dll" -o \
-                                      -name "libcrypto*.lib" -o \
-                                      -name "libssl*.dll" -o \
-                                      -name "libssl*.lib" \) \
-                                      -exec cp -v {} rel \;
-          cd rel && zip -r ../libimobile-suite-latest_w32.zip .
-
-      - name: publish release
+          mkdir rel
+          copy install\bin\*.dll rel\
+          copy install\lib\*.lib rel\
+          copy install\bin\*.exe rel\
+          cd rel
+          tar -czf ..\libimobile-suite-latest_w32_msvc.zip *
+      
+      - name: Publish Release
         env:
-          github_token: ${{secrets.GITHUB_TOKEN}}
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
         run: |
-          TAG="v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "Generated tag: $TAG"
-          gh release create "$TAG" --title "Release"
-          gh release upload "$TAG" libimobile-suite-latest_w32.zip  
-        shell: bash
+          $TAG = "v$(Get-Date -Format 'yyyyMMdd')-$(git rev-parse --short HEAD)"
+          echo "TAG=$TAG" >> $env:GITHUB_ENV
+          gh release create "$TAG" --title "Release MSVC Build"
+          gh release upload "$TAG" libimobile-suite-latest_w32_msvc.zip
+        shell: pwsh
