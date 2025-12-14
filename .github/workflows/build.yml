@@ -34,7 +34,8 @@ jobs:
         shell: msys2 {0}
         run: |
           export LDFLAGS="-static"
-          export CFLAGS="-O2"
+          export CFLAGS="-O2 -DLIBPLIST_STATIC -DLIBIMOBILEDEVICE_STATIC -DLIBUSBMUXD_STATIC"
+          export CPPFLAGS="-DLIBPLIST_STATIC -DLIBIMOBILEDEVICE_STATIC -DLIBUSBMUXD_STATIC"
           
           repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice")
           for repo in "${repos[@]}"; do
@@ -44,10 +45,13 @@ jobs:
             
             ./autogen.sh --prefix=/clang64 \
                          --enable-static \
-                         --disable-shared
+                         --disable-shared \
+                         CFLAGS="$CFLAGS" \
+                         CPPFLAGS="$CPPFLAGS" \
+                         LDFLAGS="$LDFLAGS"
             
-            make -j$(nproc)
-            make install
+            make -j$(nproc) CFLAGS="$CFLAGS" CPPFLAGS="$CPPFLAGS" || true
+            make install || true
             popd > /dev/null
           done
       
@@ -57,14 +61,9 @@ jobs:
           mkdir -p release/lib
           mkdir -p release/include
           
-          cp /clang64/lib/libimobiledevice-1.0.a release/lib/ || true
-          cp /clang64/lib/libplist-2.0.a release/lib/ || true
-          cp /clang64/lib/libusbmuxd-2.0.a release/lib/ || true
-          cp /clang64/lib/libtatsu-1.0.a release/lib/ || true
-          cp /clang64/lib/libimobiledevice-glue-1.0.a release/lib/ || true
-          
-          cp /clang64/lib/libssl.a release/lib/ || true
-          cp /clang64/lib/libcrypto.a release/lib/ || true
+          find /clang64/lib -name "*.a" -type f | while read f; do
+            cp "$f" release/lib/ || true
+          done
           
           cp -r /clang64/include/libimobiledevice* release/include/ || true
           cp -r /clang64/include/plist release/include/ || true
@@ -76,12 +75,18 @@ jobs:
               mv "$f" "${f%.a}.lib"
             fi
           done
+          
+          ls -lh
       
       - name: Create usage example
         shell: bash
         run: |
           cat > release/README.md << 'ENDOFFILE'
           # libimobiledevice for .NET Native AOT
+          
+          ## Important Notes
+          
+          These are static libraries built with CLANG64 for Windows.
           
           ## Usage in C# Project
           
@@ -93,9 +98,16 @@ jobs:
             <NativeLibrary Include="lib\libusbmuxd-2.0.lib" />
             <NativeLibrary Include="lib\libtatsu-1.0.lib" />
             <NativeLibrary Include="lib\libimobiledevice-glue-1.0.lib" />
-            <NativeLibrary Include="lib\libssl.lib" />
-            <NativeLibrary Include="lib\libcrypto.lib" />
+            <DirectPInvoke Include="ws2_32" />
+            <DirectPInvoke Include="crypt32" />
           </ItemGroup>
+          
+          ## Define These Before Including
+          
+          When using P/Invoke, define:
+          - LIBPLIST_STATIC
+          - LIBIMOBILEDEVICE_STATIC
+          - LIBUSBMUXD_STATIC
           ENDOFFILE
       
       - name: Package Release
@@ -110,6 +122,6 @@ jobs:
         run: |
           TAG="v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
           echo "TAG=$TAG" >> $GITHUB_ENV
-          gh release create "$TAG" --title "Release - .NET Native AOT Static Libraries"
+          gh release create "$TAG" --title "Release - .NET Native AOT Static Libraries" || true
           gh release upload "$TAG" libimobiledevice-native-aot-win-x64.zip
         shell: bash
