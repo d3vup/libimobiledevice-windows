@@ -12,52 +12,126 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          install: >
+            git
+            mingw-w64-i686-gcc 
+            mingw-w64-i686-curl
+            mingw-w64-i686-tools-git
+            libtool
+            openssl
+            openssl-devel
+            python-devel
+            pkgconf
+            autoconf
+            automake
+            make
+            zip
+          update: true
+      
+      - name: Configure and Build
+        shell: msys2 {0}
+        run: |
+          repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice")
+          for repo in "${repos[@]}"; do
+            echo "Building $repo..."
+            git clone "https://github.com/libimobiledevice/$repo"
+            pushd "$repo" > /dev/null
+            ./autogen.sh --prefix=/mingw32
+            make -j$(nproc)
+            make install
+            popd > /dev/null
+          done
+      
+      - name: Generate DEF files
+        shell: msys2 {0}
+        run: |
+          mkdir -p rel/msvc
+          
+          find /mingw32/bin/ -type f \( -name "libimobiledevice*.dll" -o \
+                                      -name "libplist*.dll" -o \
+                                      -name "libusbmuxd*.dll" -o \
+                                      -name "libtatsu*.dll" \) \
+                                      -exec cp -v {} rel \;
+          
+          cd rel
+          for dll in libimobiledevice*.dll libplist*.dll libusbmuxd*.dll libtatsu*.dll; do
+            if [ -f "$dll" ]; then
+              base="${dll%.dll}"
+              echo "Generating DEF for $dll..."
+              gendef "$dll"
+            fi
+          done
+      
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v1
       
-      - name: Setup vcpkg
-        run: |
-          git clone https://github.com/Microsoft/vcpkg.git
-          .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg integrate install
-      
-      - name: Install dependencies
-        run: |
-          .\vcpkg\vcpkg install openssl:x86-windows curl:x86-windows
-      
-      - name: Build with MSVC
+      - name: Generate MSVC import libraries
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          cd rel
           
-          set repos=libplist libimobiledevice-glue libusbmuxd libtatsu libimobiledevice
-          for %%r in (%repos%) do (
-            git clone https://github.com/libimobiledevice/%%r
-            cd %%r
-            cmake -B build -G "NMake Makefiles" ^
-              -DCMAKE_BUILD_TYPE=Release ^
-              -DCMAKE_INSTALL_PREFIX=../install ^
-              -DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake
-            cmake --build build --config Release
-            cmake --install build
-            cd ..
+          if not exist msvc mkdir msvc
+          
+          for %%f in (*.def) do (
+            echo Generating lib for %%f
+            lib /DEF:%%f /OUT:msvc\%%~nf.lib /MACHINE:X86
           )
       
-      - name: Package Release
+      - name: Copy additional dependencies
+        shell: msys2 {0}
         run: |
-          mkdir rel
-          copy install\bin\*.dll rel\
-          copy install\lib\*.lib rel\
-          copy install\bin\*.exe rel\
+          find /mingw32/bin/ -type f \( -name "*idevice*.exe" -o \
+                                      -name "plistutil.exe" -o \
+                                      -name "afcclient.exe" -o \
+                                      -name "inetcat.exe" -o \
+                                      -name "iproxy.exe" \) \
+                                      -exec cp -v {} rel \;
+          
+          find /mingw32/bin/ -type f \( -name "zlib*.dll" -o \
+                                      -name "libbrotli*.dll" -o \
+                                      -name "libiconv*.dll" -o \
+                                      -name "libunistring*.dll" -o \
+                                      -name "libssh*.dll" -o \
+                                      -name "libintl*.dll" -o \
+                                      -name "libidn*.dll" -o \
+                                      -name "libnghttp*.dll" -o \
+                                      -name "libpsl*.dll" -o \
+                                      -name "libzstd*.dll" -o \
+                                      -name "libcrypto*.dll" -o \
+                                      -name "libssl*.dll" \) \
+                                      -exec cp -v {} rel \;
+      
+      - name: Copy header files
+        shell: msys2 {0}
+        run: |
+          mkdir -p rel/include
+          cp -r /mingw32/include/libimobiledevice* rel/include/ 2>/dev/null || true
+          cp -r /mingw32/include/plist rel/include/ 2>/dev/null || true
+          cp -r /mingw32/include/libusbmuxd rel/include/ 2>/dev/null || true
+      
+      - name: Package Release
+        shell: msys2 {0}
+        run: |
           cd rel
-          tar -czf ..\libimobile-suite-latest_w32_msvc.zip *
+          
+          
+          zip -r ../libimobile-suite-runtime_w32.zip *.dll *.exe
+          
+          zip -r ../libimobile-suite-dotnet-aot_w32.zip msvc/*.lib include/ *.dll
       
       - name: Publish Release
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
         run: |
-          $TAG = "v$(Get-Date -Format 'yyyyMMdd')-$(git rev-parse --short HEAD)"
-          echo "TAG=$TAG" >> $env:GITHUB_ENV
-          gh release create "$TAG" --title "Release MSVC Build"
-          gh release upload "$TAG" libimobile-suite-latest_w32_msvc.zip
-        shell: pwsh
+          TAG="v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "Generated tag: $TAG"
+          gh release create "$TAG" --title "Release - .NET AOT Compatible"
+          gh release upload "$TAG" libimobile-suite-runtime_w32.zip
+          gh release upload "$TAG" libimobile-suite-dotnet-aot_w32.zip
+        shell: bash
