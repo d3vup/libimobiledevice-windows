@@ -1,4 +1,4 @@
-name: build
+name: build-native-aot-compatible
 on:
   schedule:
       - cron: '0 0 * * 0'
@@ -12,117 +12,98 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up MSYS2
+      - name: Set up MSYS2 with CLANG64
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW32
+          msystem: CLANG64
           install: >
             git
-            mingw-w64-i686-gcc 
-            mingw-w64-i686-curl
-            mingw-w64-i686-tools-git
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-lld
+            mingw-w64-clang-x86_64-openssl
+            mingw-w64-clang-x86_64-curl
             libtool
-            openssl
-            openssl-devel
-            python-devel
-            pkgconf
             autoconf
             automake
             make
+            pkgconf
             zip
           update: true
       
-      - name: Configure and Build
+      - name: Build Static Libraries
         shell: msys2 {0}
         run: |
+          export LDFLAGS="-static"
+          export CFLAGS="-O2"
+          
           repos=("libplist" "libimobiledevice-glue" "libusbmuxd" "libtatsu" "libimobiledevice")
           for repo in "${repos[@]}"; do
             echo "Building $repo..."
             git clone "https://github.com/libimobiledevice/$repo"
             pushd "$repo" > /dev/null
-            ./autogen.sh --prefix=/mingw32
+            
+            ./autogen.sh --prefix=/clang64 \
+                         --enable-static \
+                         --disable-shared
+            
             make -j$(nproc)
             make install
             popd > /dev/null
           done
       
-      - name: Generate DEF files
+      - name: Collect static libraries
         shell: msys2 {0}
         run: |
-          mkdir -p rel/msvc
+          mkdir -p release/lib
+          mkdir -p release/include
           
-          find /mingw32/bin/ -type f \( -name "libimobiledevice*.dll" -o \
-                                      -name "libplist*.dll" -o \
-                                      -name "libusbmuxd*.dll" -o \
-                                      -name "libtatsu*.dll" \) \
-                                      -exec cp -v {} rel \;
+          cp /clang64/lib/libimobiledevice-1.0.a release/lib/ || true
+          cp /clang64/lib/libplist-2.0.a release/lib/ || true
+          cp /clang64/lib/libusbmuxd-2.0.a release/lib/ || true
+          cp /clang64/lib/libtatsu-1.0.a release/lib/ || true
+          cp /clang64/lib/libimobiledevice-glue-1.0.a release/lib/ || true
           
-          cd rel
-          for dll in libimobiledevice*.dll libplist*.dll libusbmuxd*.dll libtatsu*.dll; do
-            if [ -f "$dll" ]; then
-              base="${dll%.dll}"
-              echo "Generating DEF for $dll..."
-              gendef "$dll"
+          cp /clang64/lib/libssl.a release/lib/ || true
+          cp /clang64/lib/libcrypto.a release/lib/ || true
+          
+          cp -r /clang64/include/libimobiledevice* release/include/ || true
+          cp -r /clang64/include/plist release/include/ || true
+          cp -r /clang64/include/libusbmuxd release/include/ || true
+          
+          cd release/lib
+          for f in *.a; do
+            if [ -f "$f" ]; then
+              mv "$f" "${f%.a}.lib"
             fi
           done
       
-      - name: Setup MSVC
-        uses: microsoft/setup-msbuild@v1
-      
-      - name: Generate MSVC import libraries
-        shell: cmd
+      - name: Create usage example
+        shell: bash
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
-          cd rel
+          cat > release/README.md << 'EOF'
+          # libimobiledevice for .NET Native AOT
           
-          if not exist msvc mkdir msvc
+          ## Usage in C# Project
           
-          for %%f in (*.def) do (
-            echo Generating lib for %%f
-            lib /DEF:%%f /OUT:msvc\%%~nf.lib /MACHINE:X86
-          )
-      
-      - name: Copy additional dependencies
-        shell: msys2 {0}
-        run: |
-          find /mingw32/bin/ -type f \( -name "*idevice*.exe" -o \
-                                      -name "plistutil.exe" -o \
-                                      -name "afcclient.exe" -o \
-                                      -name "inetcat.exe" -o \
-                                      -name "iproxy.exe" \) \
-                                      -exec cp -v {} rel \;
-          
-          find /mingw32/bin/ -type f \( -name "zlib*.dll" -o \
-                                      -name "libbrotli*.dll" -o \
-                                      -name "libiconv*.dll" -o \
-                                      -name "libunistring*.dll" -o \
-                                      -name "libssh*.dll" -o \
-                                      -name "libintl*.dll" -o \
-                                      -name "libidn*.dll" -o \
-                                      -name "libnghttp*.dll" -o \
-                                      -name "libpsl*.dll" -o \
-                                      -name "libzstd*.dll" -o \
-                                      -name "libcrypto*.dll" -o \
-                                      -name "libssl*.dll" \) \
-                                      -exec cp -v {} rel \;
-      
-      - name: Copy header files
-        shell: msys2 {0}
-        run: |
-          mkdir -p rel/include
-          cp -r /mingw32/include/libimobiledevice* rel/include/ 2>/dev/null || true
-          cp -r /mingw32/include/plist rel/include/ 2>/dev/null || true
-          cp -r /mingw32/include/libusbmuxd rel/include/ 2>/dev/null || true
+          Add to your .csproj:
+```xml
+          <ItemGroup>
+            <NativeLibrary Include="lib\libimobiledevice-1.0.lib" />
+            <NativeLibrary Include="lib\libplist-2.0.lib" />
+            <NativeLibrary Include="lib\libusbmuxd-2.0.lib" />
+            <NativeLibrary Include="lib\libtatsu-1.0.lib" />
+            <NativeLibrary Include="lib\libimobiledevice-glue-1.0.lib" />
+            <NativeLibrary Include="lib\libssl.lib" />
+            <NativeLibrary Include="lib\libcrypto.lib" />
+          </ItemGroup>
+```
+          EOF
       
       - name: Package Release
-        shell: msys2 {0}
+        shell: bash
         run: |
-          cd rel
-          
-          
-          zip -r ../libimobile-suite-runtime_w32.zip *.dll *.exe
-          
-          zip -r ../libimobile-suite-dotnet-aot_w32.zip msvc/*.lib include/ *.dll
+          cd release
+          zip -r ../libimobiledevice-native-aot-win-x64.zip .
       
       - name: Publish Release
         env:
@@ -130,8 +111,6 @@ jobs:
         run: |
           TAG="v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
           echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "Generated tag: $TAG"
-          gh release create "$TAG" --title "Release - .NET AOT Compatible"
-          gh release upload "$TAG" libimobile-suite-runtime_w32.zip
-          gh release upload "$TAG" libimobile-suite-dotnet-aot_w32.zip
+          gh release create "$TAG" --title "Release - .NET Native AOT Static Libraries"
+          gh release upload "$TAG" libimobiledevice-native-aot-win-x64.zip
         shell: bash
